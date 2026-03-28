@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
-import { useAccount, useDisconnect } from 'wagmi';
+import { useAccount, useDisconnect, useReadContract } from 'wagmi';
 import { formatEther } from 'viem';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import CharacterSelect from './components/CharacterSelect';
 import Arena from './components/Arena';
 import { useFightCount, useActiveFights } from './hooks/useMonadFighters';
+import { CONTRACT_ADDRESS, ABI } from './constants';
 
 export default function App() {
-  const [screen, setScreen] = useState('select'); // select | arena | leaderboard
+  const [screen, setScreen] = useState('select'); 
   const [currentFightId, setCurrentFightId] = useState(null);
   const [activeBattleId, setActiveBattleId] = useState(null);
   
@@ -17,10 +18,9 @@ export default function App() {
   const { data: rawFightCount } = useFightCount();
   const fightCount = rawFightCount ? Number(rawFightCount) : 0;
 
-  const handleEnterArena = (fighterId, stake) => {
-    const newId = fightCount;
-    setCurrentFightId(newId);
-    setActiveBattleId(newId);
+  const handleEnterArena = (fightId) => {
+    setCurrentFightId(Number(fightId));
+    setActiveBattleId(Number(fightId));
     setScreen('arena');
   };
 
@@ -33,7 +33,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-purple-500/30">
       
-      {/* GLOBAL NAVIGATION --- T-55 */}
       <nav className="fixed top-8 right-8 z-[300] flex items-center gap-4 bg-black/80 backdrop-blur-3xl p-3 rounded-2xl border border-white/10 shadow-2xl">
         <div className="flex items-center gap-2 pr-3 border-r border-white/10 mr-1">
             <button 
@@ -81,13 +80,11 @@ export default function App() {
         )}
       </nav>
 
-      {/* SCREEN ROUTER --- T-54 to T-57 */}
       <main>
         {screen === 'select' && (
           <CharacterSelect 
             onEnterArena={handleEnterArena} 
             onJoinFight={handleJoinFight} 
-            activeFightId={activeBattleId}
           />
         )}
 
@@ -103,9 +100,8 @@ export default function App() {
         )}
       </main>
 
-      {/* FOOTER BAR */}
       <div className="fixed bottom-6 right-8 text-[10px] font-mono text-slate-700 tracking-[0.3em] uppercase pointer-events-none z-50">
-        Monad_Fighters // Built for Monad Blitz Hackathon
+        Monad_Fighters // Speed Combat Protocol
       </div>
 
     </div>
@@ -113,52 +109,63 @@ export default function App() {
 }
 
 function Leaderboard({ fightCount }) {
-  // Mocking leaderboard data for demo - pulls recently resolved addresses in production
-  const topWallets = [
-    { address: '0x5aA40...94be7', wins: 24, earnings: '1.25', rank: 1, color: '#FFD700' },
-    { address: '0x1cEd3...2A4b1', wins: 18, earnings: '0.82', rank: 2, color: '#C0C0C0' },
-    { address: '0x8f2A9...dD3e4', wins: 15, earnings: '0.54', rank: 3, color: '#CD7F32' },
-  ];
+  // We'll scan the last 10 fights to find real recent winners
+  const start = fightCount > 10 ? fightCount - 10 : 0;
+  const ids = Array.from({ length: Math.min(fightCount, 10) }, (_, i) => start + i).reverse();
 
   return (
     <div className="min-h-screen pt-32 px-6 flex flex-col items-center"
-         style={{ background: 'radial-gradient(ellipse at top, #1a0a2e 0%, #0a0a0f 60%)' }}>
+         style={{ background: 'radial-gradient(ellipse at top, #1a0a2e 0%, #050508 60%)' }}>
       
       <div className="text-center mb-16">
-        <h2 className="text-5xl font-black italic tracking-tighter text-purple-400 mb-2 animate-glow">LEADERBOARD</h2>
-        <p className="text-xs text-slate-500 font-mono tracking-widest uppercase">Global Wallet Status // Total Battles: {fightCount}</p>
+        <h2 className="text-5xl font-black italic tracking-tighter text-purple-500 mb-2 animate-glow">ARENA CHAMPIONS</h2>
+        <p className="text-xs text-slate-500 font-mono tracking-widest uppercase">Live Conquest Log // Total Battles Recorded: {fightCount}</p>
       </div>
 
       <div className="w-full max-w-2xl flex flex-col gap-4">
-        {topWallets.map(w => (
-          <div key={w.rank} className="glass-panel p-6 rounded-2xl flex items-center justify-between border-l-4" style={{ borderColor: w.color }}>
-            <div className="flex items-center gap-6">
-              <span className="text-2xl font-black italic text-slate-800" style={{ WebkitTextStroke: `1px ${w.color}` }}>#0{w.rank}</span>
-              <div>
-                <p className="text-lg font-black italic text-white tracking-tight">{w.address}</p>
-                <p className="text-[10px] text-slate-500 font-mono uppercase tracking-widest mt-1">Wallet Identity</p>
-              </div>
-            </div>
-            <div className="flex gap-10 text-right">
-              <div>
-                <p className="text-xl font-black italic text-purple-400">{w.wins}</p>
-                <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest mt-1">Wins</p>
-              </div>
-              <div>
-                <p className="text-xl font-black italic text-yellow-500">+{w.earnings} MON</p>
-                <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest mt-1">Earnings</p>
-              </div>
-            </div>
-          </div>
+        {ids.map((id, index) => (
+          <RecentWinnerItem key={id} fightId={id} rank={index + 1} />
         ))}
       </div>
 
       <div className="mt-20 p-8 glass-panel rounded-3xl border border-white/5 border-dashed max-w-xl text-center">
-         <p className="text-xs text-slate-500 font-mono leading-relaxed uppercase tracking-tighter">
-            Leaderboard rankings update instantly upon block confirmation. High-speed settlement on Monad ensures real-time competitive integrity for all active players.
+         <p className="text-xs text-slate-600 font-mono leading-relaxed uppercase tracking-tighter">
+            Rankings are indexed directly from the Monad Testnet blocks. High speed settlement ensures zero-latency competitive integrity for all warriors.
          </p>
       </div>
 
     </div>
   );
+}
+
+function RecentWinnerItem({ fightId, rank }) {
+    const { data: fight } = useReadContract({
+        address: CONTRACT_ADDRESS,
+        abi: ABI,
+        functionName: 'fights',
+        args: [fightId]
+    });
+
+    if (!fight || Number(fight[7]) !== 2) return null; // Status enum 2 = Resolved
+
+    const winner = fight[6];
+    const payout = formatEther(fight[4] * 2n);
+
+    return (
+        <div className="glass-panel p-6 rounded-2xl flex items-center justify-between border-l-4 border-yellow-500/30 animate-in slide-in-from-left duration-300">
+            <div className="flex items-center gap-6">
+              <span className="text-2xl font-black italic text-slate-800" style={{ WebkitTextStroke: `1px ${rank === 1 ? '#eab308' : '#666'}` }}>
+                {rank < 10 ? `0${rank}` : rank}
+              </span>
+              <div>
+                <p className="text-lg font-black italic text-white tracking-tight">{winner.slice(0,10)}...{winner.slice(-8)}</p>
+                <p className="text-[10px] text-slate-500 font-mono uppercase tracking-widest mt-1">Battle #{fightId.toString()} // Final Victory</p>
+              </div>
+            </div>
+            <div className="text-right">
+                <p className="text-xl font-black italic text-yellow-500">+{payout} MON</p>
+                <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest mt-1">Earnings</p>
+            </div>
+        </div>
+    );
 }

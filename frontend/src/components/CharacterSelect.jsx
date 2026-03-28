@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { useAccount } from 'wagmi';
-import { useMonadFighters } from '../hooks/useMonadFighters';
+import { useAccount, useReadContract } from 'wagmi';
+import { formatEther } from 'viem';
+import { useMonadFighters, useFightCount, useActiveFights } from '../hooks/useMonadFighters';
+import { CONTRACT_ADDRESS, ABI } from '../constants';
 
 export const FIGHTERS = [
   { id: 0, name: 'CHAIN BREAKER', color: '#3B82F6', desc: 'Unstoppable force wrapped in glowing energy.' },
@@ -11,174 +13,168 @@ export const FIGHTERS = [
   { id: 5, name: 'HASH HUNTER',   color: '#06B6D4', desc: 'Bounty hunter with high-precision teal visor.' },
 ];
 
-export default function CharacterSelect({ onEnterArena, onJoinFight, activeFightId }) {
+export default function CharacterSelect({ onEnterArena, onJoinFight }) {
   const { isConnected } = useAccount();
-  const { enterArena, joinFight, isPending } = useMonadFighters();
+  const { enterArena, startTraining, joinFight, isPending } = useMonadFighters();
+  const { data: currentFightCount, refetch: refetchCount } = useFightCount();
+  const { data: activeFights } = useActiveFights();
   
   const [selected, setSelected] = useState(null);
-  const [stake, setStake] = useState('0.05');
-  const [mode, setMode] = useState('create'); // 'create' or 'join'
-  const [joinId, setJoinId] = useState('');
+  const [stake, setStake] = useState('0.01'); 
+  const [mode, setMode] = useState('create'); 
 
   const handleAction = async () => {
     if (selected === null) return alert('Pick a fighter first!');
     
     try {
+      const predictedId = currentFightCount ? currentFightCount.toString() : "0";
+
       if (mode === 'create') {
-        const tx = await enterArena(selected, stake);
-        onEnterArena(selected, stake);
-      } else {
-        if (!joinId) return alert('Enter a Fight ID to join!');
-        // Note: Joining requires the EXACT stake already in the fight
-        // For the hackathon, we fetch the stake or use the user's input
-        await joinFight(joinId, selected, stake);
-        onJoinFight(joinId, selected);
+        await enterArena(selected, stake);
+        await refetchCount();
+        onEnterArena(predictedId, selected);
+      } else if (mode === 'train') {
+        await startTraining(selected, stake);
+        await refetchCount();
+        onEnterArena(predictedId, selected);
       }
     } catch (e) {
-      console.error(e);
-      alert('Transaction failed: Check your balance or if the Fight ID exists!');
+        const shortMsg = e.shortMessage || e.message || "Unknown Error";
+        alert(`BATTLE ERROR: ${shortMsg}`);
+    }
+  };
+
+  const handleJoinLobby = async (fightId, lobbyStake) => {
+    if (selected === null) return alert('PICK A FIGHTER BEFORE JOINING THE LOBBY!');
+    try {
+        await joinFight(fightId, selected, formatEther(lobbyStake));
+        onJoinFight(fightId, selected);
+    } catch (e) {
+        alert("JOIN FAILED: Check your balance or if the fight is still open.");
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-start py-20 px-6 bg-slate-950"
-         style={{ background: 'radial-gradient(ellipse at center, #1a0a2e 0%, #0a0a0f 70%)' }}>
+         style={{ background: 'radial-gradient(ellipse at center, #1a0a2e 0%, #050508 70%)' }}>
       
-      {/* GLOWING LOGO --- T-38 */}
       <div className="text-center mb-12">
-        <h1 className="text-6xl font-black tracking-tighter mb-2 animate-glow italic"
-            style={{ color: '#a855f7' }}>
-          MONAD FIGHTERS
-        </h1>
-        <p className="text-purple-400 font-mono tracking-widest text-sm uppercase">
-          On-chain PvP Arena // High Speed Battle
-        </p>
+        <h1 className="text-6xl font-black tracking-tighter mb-2 animate-glow italic text-purple-500">MONAD FIGHTERS</h1>
+        <p className="text-purple-400 font-mono tracking-widest text-sm uppercase">On-chain PvP Arena // High Speed Battle</p>
       </div>
 
       {!isConnected ? (
         <div className="flex flex-col items-center gap-4 bg-white/5 p-12 rounded-2xl border border-white/10 backdrop-blur-xl">
-           <p className="text-slate-400 text-center text-sm font-mono max-w-xs">
-              INITIALIZE YOUR WALLET PROTOCOL TO ENTER THE BATTLE ARENA.
-           </p>
+           <p className="text-slate-400 text-center text-sm font-mono max-w-xs trackers">INITIALIZE YOUR WALLET PROTOCOL TO ENTER THE BATTLE ARENA.</p>
         </div>
       ) : (
-        <div className="w-full max-w-5xl flex flex-col items-center">
+        <div className="w-full max-w-6xl flex flex-col items-center">
           
-          {/* CREATE/JOIN TOGGLE --- T-33 */}
-          <div className="flex gap-4 p-1 bg-white/5 rounded-lg border border-white/10 mb-10 w-full max-w-md">
-            <button 
-              onClick={() => setMode('create')}
-              className={`flex-1 py-3 rounded-md text-xs font-bold tracking-widest transition-all ${
-                mode === 'create' ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20' : 'text-slate-500 hover:text-slate-400'
-              }`}
-            >
-              CREATE ARENA
-            </button>
-            <button 
-              onClick={() => setMode('join')}
-              className={`flex-1 py-3 rounded-md text-xs font-bold tracking-widest transition-all ${
-                mode === 'join' ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/20' : 'text-slate-500 hover:text-slate-400'
-              }`}
-            >
-              JOIN BATTLE
-            </button>
-          </div>
-
-          {/* FIGHTER GRID --- T-34 */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mb-12 w-full">
-            {FIGHTERS.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setSelected(f.id)}
-                className={`group relative p-6 rounded-2xl border-2 transition-all duration-300 transform text-left hover:scale-[1.03] active:scale-100 ${
-                  selected === f.id ? 'bg-white/10' : 'bg-white/5 border-white/5 hover:border-white/20'
+          <div className="flex gap-4 p-1 bg-white/5 rounded-lg border border-white/10 mb-10 w-full max-w-lg">
+            {['create', 'join', 'train'].map((m) => (
+              <button 
+                key={m}
+                onClick={() => setMode(m)}
+                className={`flex-1 py-3 rounded-md text-[10px] font-black tracking-widest transition-all uppercase ${
+                  mode === m ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20' : 'text-slate-500 hover:text-slate-400'
                 }`}
-                style={{ 
-                  borderColor: selected === f.id ? f.color : undefined,
-                  boxShadow: selected === f.id ? `0 0 30px ${f.color}33` : 'none'
-                }}
               >
-                {/* Fighter Preview --- Portals Fix */}
-                <div 
-                  className={`aspect-square w-full mb-6 rounded-full overflow-hidden border-4 transition-all duration-500 flex items-center justify-center bg-slate-900 ${
-                    selected === f.id ? 'scale-110 rotate-3' : 'group-hover:scale-105'
-                  }`}
-                  style={{ 
-                    borderColor: f.color + '44',
-                    boxShadow: `inset 0 0 40px ${f.color}66, 0 0 20px ${f.color}33`
-                  }}
-                >
-                  <img 
-                    src={`/fighters/f${f.id}.png`} 
-                    alt={f.name}
-                    className="w-full h-full object-cover"
-                    onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
-                  />
-                  <div className="hidden text-5xl">⚔️</div>
-                </div>
-
-                {/* Info */}
-                <h3 className="font-black text-xl italic tracking-tighter mb-1" style={{ color: f.color }}>{f.name}</h3>
-                <p className="text-xs text-slate-500 font-mono leading-relaxed line-clamp-2 uppercase">{f.desc}</p>
-                
-                {selected === f.id && (
-                  <div className="absolute top-4 right-4 h-3 w-3 rounded-full animate-ping" style={{ background: f.color }}></div>
-                )}
+                {m === 'create' ? 'PvP ARENA' : m === 'join' ? 'BATTLE LOBBY' : 'SHADOW TRAIN'}
               </button>
             ))}
           </div>
 
-          {/* INPUT BAR --- T-35 & T-36 */}
-          <div className="sticky bottom-10 w-full max-w-2xl bg-black/80 backdrop-blur-2xl border border-white/10 p-2 rounded-2xl shadow-2xl flex items-center gap-2">
-            
-            <div className="flex-1 flex flex-col justify-center px-4">
-               <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest pl-1 mb-1">Stake (MON)</span>
-               <input 
-                 type="number" 
-                 value={stake}
-                 onChange={(e) => setStake(e.target.value)}
-                 step="0.01"
-                 className="bg-transparent text-xl font-black text-white outline-none w-full"
-               />
+          {mode === 'join' ? (
+            <div className="w-full max-w-3xl flex flex-col gap-4 animate-in slide-in-from-bottom duration-500">
+                <h2 className="text-2xl font-black italic text-white tracking-widest mb-4">ACTIVE CHALLENGES</h2>
+                {activeFights && activeFights.length > 0 ? (
+                    activeFights.map(id => (
+                        <LobbyItem key={id} fightId={id} onJoin={handleJoinLobby} selectedFighter={selected} />
+                    ))
+                ) : (
+                    <div className="p-12 border-2 border-dashed border-white/5 rounded-3xl text-center">
+                        <p className="text-slate-600 font-mono text-xs uppercase tracking-widest">No active brawlers waiting. Create your own arena above!</p>
+                    </div>
+                )}
             </div>
-
-            {mode === 'join' && (
-              <div className="flex-1 border-l border-white/10 flex flex-col justify-center px-4">
-                 <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest pl-1 mb-1">Fight ID</span>
-                 <input 
-                   type="number" 
-                   placeholder="Enter ID"
-                   value={joinId}
-                   onChange={(e) => setJoinId(e.target.value)}
-                   className="bg-transparent text-xl font-black text-white outline-none w-full"
-                 />
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mb-12 w-full">
+                {FIGHTERS.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setSelected(f.id)}
+                    className={`group relative p-6 rounded-2xl border-2 transition-all duration-300 transform text-left hover:scale-[1.03] active:scale-100 ${
+                      selected === f.id ? 'bg-white/10' : 'bg-white/5 border-white/5'
+                    }`}
+                    style={{ borderColor: selected === f.id ? f.color : undefined, boxShadow: selected === f.id ? `0 0 30px ${f.color}33` : 'none' }}
+                  >
+                    <div className="aspect-square w-full mb-6 rounded-full overflow-hidden border-4 transition-all duration-500 flex items-center justify-center bg-slate-900" style={{ borderColor: f.color + '44' }}>
+                      <img src={`/fighters/f${f.id}.png`} alt={f.name} className="w-full h-full object-cover" />
+                    </div>
+                    <h3 className="font-black text-xl italic tracking-tighter mb-1" style={{ color: f.color }}>{f.name}</h3>
+                    <p className="text-[10px] text-slate-500 font-mono leading-relaxed line-clamp-2 uppercase">{f.desc}</p>
+                  </button>
+                ))}
               </div>
-            )}
 
-            <button
-              onClick={handleAction}
-              disabled={isPending || selected === null}
-              className="px-10 py-5 rounded-xl font-black italic tracking-tighter text-xl transition-all active:scale-95 disabled:opacity-50"
-              style={{
-                background: selected !== null ? FIGHTERS[selected].color : '#333',
-                color: '#000',
-                boxShadow: selected !== null ? `0 0 40px ${FIGHTERS[selected].color}88` : 'none'
-              }}
-            >
-              {isPending ? 'STAKING...' : mode === 'create' ? 'ENTER ARENA' : 'BATTLE NOW'}
-            </button>
-          </div>
+              <div className="sticky bottom-10 w-full max-w-2xl bg-black/80 backdrop-blur-2xl border border-white/10 p-2 rounded-2xl shadow-2xl flex items-center gap-2">
+                <div className="flex-1 flex flex-col justify-center px-4">
+                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest pl-1 mb-1">STAKE (MON)</span>
+                   <input type="number" value={stake} onChange={(e) => setStake(e.target.value)} step="0.01" className="bg-transparent text-xl font-black text-white outline-none w-full" />
+                </div>
 
+                <button
+                  onClick={handleAction}
+                  disabled={isPending || selected === null}
+                  className="px-10 py-5 rounded-xl font-black italic tracking-tighter text-xl transition-all active:scale-95 disabled:opacity-50"
+                  style={{ background: selected !== null ? FIGHTERS[selected].color : '#333', color: '#000', boxShadow: selected !== null ? `0 0 40px ${FIGHTERS[selected].color}88` : 'none' }}
+                >
+                  {isPending ? 'STAKING...' : mode === 'train' ? 'SHADOW FIGHT' : 'ENTER ARENA'}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
-
-      {/* FOOTER STATS */}
-      <div className="mt-20 flex gap-12 border-t border-white/5 pt-12 opacity-50 max-md:flex-col max-md:gap-6 text-center">
-        <div><p className="text-2xl font-black italic text-white leading-none">0.8 SEC</p><p className="text-[10px] text-slate-500 uppercase font-mono tracking-widest mt-1">Settlement Speed</p></div>
-        <div><p className="text-2xl font-black italic text-white leading-none">10143</p><p className="text-[10px] text-slate-500 uppercase font-mono tracking-widest mt-1">Network Protocol</p></div>
-        <div><p className="text-2xl font-black italic text-white leading-none">ZERO</p><p className="text-[10px] text-slate-500 uppercase font-mono tracking-widest mt-1">Latency Lag</p></div>
-      </div>
-
     </div>
   );
+}
+
+function LobbyItem({ fightId, onJoin, selectedFighter }) {
+    const { data: fight } = useReadContract({
+        address: CONTRACT_ADDRESS,
+        abi: ABI,
+        functionName: 'fights',
+        args: [fightId]
+    });
+
+    if (!fight) return null;
+    const fighter = FIGHTERS[fight[2]]; // fighter1Id
+
+    return (
+        <div className="bg-white/5 border border-white/10 p-6 rounded-3xl flex items-center justify-between hover:bg-white/10 transition-colors">
+            <div className="flex items-center gap-6">
+                <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-white/10">
+                    <img src={`/fighters/f${fight[2]}.png`} alt="Opponent" className="w-full h-full object-cover" />
+                </div>
+                <div>
+                    <h4 className="text-xl font-black italic text-white tracking-widest uppercase">{fighter.name}</h4>
+                    <p className="text-[10px] text-purple-400 font-mono font-black italic">{fight[0].slice(0,6)}...{fight[0].slice(-4)}</p>
+                </div>
+            </div>
+            <div className="flex items-center gap-10">
+                <div className="text-right">
+                    <p className="text-[10px] text-slate-500 font-mono uppercase tracking-widest mb-1">STAKE REQUIRED</p>
+                    <p className="text-xl font-black italic text-yellow-500">{formatEther(fight[4])} MON</p>
+                </div>
+                <button 
+                  onClick={() => onJoin(fightId, fight[4])}
+                  className={`px-8 py-3 rounded-xl font-black italic tracking-tighter text-sm transition-all hover:scale-105 active:scale-95 ${selectedFighter === null ? 'bg-slate-800 text-slate-500' : 'bg-green-500 text-black'}`}
+                >
+                    JOIN BATTLE
+                </button>
+            </div>
+        </div>
+    );
 }
