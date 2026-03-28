@@ -1,20 +1,109 @@
 export const CONTRACT_ADDRESS = "0x03a1692E4Ad8C98d5A0903ee6f29075Ab581543b";
 
 export const ABI = [
-  "function enterArena(uint8 fighterId) external payable returns (uint256)",
-  "function joinFight(uint256 fightId, uint8 fighterId) external payable",
-  "function betOnFighter(uint256 fightId, uint8 side) external payable",
-  "function resolveFight(uint256 fightId) external",
-  "function getFight(uint256 id) external view returns (tuple(address player1, address player2, uint8 fighter1Id, uint8 fighter2Id, uint256 stake, uint256 crowdPot, address winner, uint8 status, uint256 createdAt))",
-  "function getCrowdBets(uint256 id) external view returns (tuple(address bettor, uint256 amount, uint8 side)[])",
-  "function getFighter(uint8 id) external view returns (tuple(string name, uint256 wins, uint256 losses))",
-  "function getActiveFights() external view returns (uint256[])",
-  "function walletWins(address) external view returns (uint256)",
-  "function walletEarnings(address) external view returns (uint256)",
-  "function fightCount() external view returns (uint256)",
-  "function fighters(uint256) external view returns (string name, uint256 wins, uint256 losses)",
-  "event FightCreated(uint256 indexed fightId, address indexed player1, uint8 fighter1Id)",
-  "event FightJoined(uint256 indexed fightId, address indexed player2, uint8 fighter2Id)",
-  "event BetPlaced(uint256 indexed fightId, address indexed bettor, uint8 side, uint256 amount)",
-  "event FightResolved(uint256 indexed fightId, address indexed winner, uint256 payout)"
+  {
+    "type": "function",
+    "name": "enterArena",
+    "inputs": [{ "name": "fighterId", "type": "uint8" }],
+    "outputs": [{ "name": "", "type": "uint256" }],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "joinFight",
+    "inputs": [
+      { "name": "fightId", "type": "uint256" },
+      { "name": "fighterId", "type": "uint8" }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "betOnFighter",
+    "inputs": [
+      { "name": "fightId", "type": "uint256" },
+      { "name": "side", "type": "uint8" }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "resolveFight",
+    "inputs": [{ "name": "fightId", "type": "uint256" }],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getFight",
+    "inputs": [{ "name": "id", "type": "uint256" }],
+    "outputs": [
+      {
+        "components": [
+          { "name": "player1", "type": "address" },
+          { "name": "player2", "type": "address" },
+          { "name": "fighter1Id", "type": "uint8" },
+          { "name": "fighter2Id", "type": "uint8" },
+          { "name": "stake", "type": "uint256" },
+          { "name": "crowdPot", "type": "uint256" },
+          { "name": "winner", "type": "address" },
+          { "name": "status", "type": "uint8" },
+          { "name": "createdAt", "type": "uint256" }
+        ],
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCrowdBets",
+    "inputs": [{ "name": "id", "type": "uint256" }],
+    "outputs": [
+      {
+        "components": [
+          { "name": "bettor", "type": "address" },
+          { "name": "amount", "type": "uint256" },
+          { "name": "side", "type": "uint8" }
+        ],
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getFighter",
+    "inputs": [{ "name": "id", "type": "uint8" }],
+    "outputs": [
+      {
+        "components": [
+          { "name": "name", "type": "string" },
+          { "name": "wins", "type": "uint256" },
+          { "name": "losses", "type": "uint256" }
+        ],
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "fightCount",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "uint256" }],
+    "stateMutability": "view"
+  },
+  {
+     "type": "function",
+     "name": "getActiveFights",
+     "inputs": [],
+     "outputs": [{ "name": "", "type": "uint256[]" }],
+     "stateMutability": "view"
+  }
 ];
