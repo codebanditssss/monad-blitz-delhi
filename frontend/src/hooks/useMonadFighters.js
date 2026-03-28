@@ -1,4 +1,4 @@
-import { useWriteContract, useReadContract, useWatchContractEvent, useSendTransaction } from 'wagmi';
+import { useWriteContract, useReadContract, useWatchContractEvent } from 'wagmi';
 import { parseEther, createWalletClient, http, publicActions } from 'viem';
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import { CONTRACT_ADDRESS, ABI } from '../constants';
@@ -16,17 +16,9 @@ const getSessionAccount = () => {
 
 export function useMonadFighters() {
   const { writeContractAsync, isPending } = useWriteContract();
-  const { sendTransactionAsync } = useSendTransaction();
   const sessionAccount = getSessionAccount();
 
-  // Step 1: Fund the burner wallet directly (simple ETH transfer, no contract)
-  const fundSession = () =>
-    sendTransactionAsync({
-      to: sessionAccount.address,
-      value: parseEther('0.005'), // 0.005 MON for gas - lasts many fights
-    });
-
-  // Step 2: Authorize the burner in the contract (separate call)
+  // Authorize the burner wallet on-chain (no value — user funds burner manually)
   const authorizeSession = () =>
     writeContractAsync({
       address: CONTRACT_ADDRESS,
@@ -114,7 +106,6 @@ export function useMonadFighters() {
     playMove,
     forfeitFight,
     betOnFighter,
-    fundSession,
     authorizeSession,
     sessionAddress: sessionAccount.address,
     isPending,

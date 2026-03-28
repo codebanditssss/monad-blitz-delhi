@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAccount, useReadContract } from 'wagmi';
+import { useAccount, useReadContract, useBalance } from 'wagmi';
 import { formatEther } from 'viem';
 import { useMonadFighters, useFight, useWatchFightMoves } from '../hooks/useMonadFighters';
 import { FIGHTERS } from './CharacterSelect';
@@ -16,8 +16,10 @@ const STATS = [
 
 export default function Arena({ fightId, onBackToSelect }) {
   const { address } = useAccount();
-  const { playMove, forfeitFight, fundSession, authorizeSession, sessionAddress, isPending } = useMonadFighters();
+  const { playMove, forfeitFight, authorizeSession, sessionAddress, isPending } = useMonadFighters();
   const { data: fightData } = useFight(fightId);
+  const [setupStep, setSetupStep] = useState(0);
+  const [lastMoveMsg, setLastMoveMsg] = useState('');
 
   const { data: remoteSession } = useReadContract({
     address: CONTRACT_ADDRESS,
@@ -26,229 +28,232 @@ export default function Arena({ fightId, onBackToSelect }) {
     args: [address],
     query: { refetchInterval: 3000 }
   });
-
   const isSessionReady = remoteSession?.toLowerCase() === sessionAddress?.toLowerCase();
-  const [setupStep, setSetupStep] = useState(0);
-  const [anim1, setAnim1] = useState('');
-  const [anim2, setAnim2] = useState('');
-  const [flash, setFlash] = useState(false);
-  const [lastMoveMsg, setLastMoveMsg] = useState('');
 
-  useWatchFightMoves(fightId, (log) => {
-    const isP1Move = log.player?.toLowerCase() === fightData?.player1?.toLowerCase();
-    const moveType = Number(log.moveType);
-    const wasHit = log.wasHit;
-    const dmg = Number(log.damage);
-    setFlash(true);
-    setTimeout(() => setFlash(false), 150);
-    if (moveType === 3) {
-      setLastMoveMsg(`${isP1Move ? 'P1' : 'P2'} BLOCKS! 🛡️`);
-    } else {
-      setLastMoveMsg(`${isP1Move ? 'P1' : 'P2'} ${wasHit ? `HITS for ${dmg} dmg 💥` : 'MISSED! 😤'}`);
-    }
-    if (isP1Move) { setAnim1('scale-110'); setTimeout(() => setAnim1(''), 300); }
-    else { setAnim2('scale-110'); setTimeout(() => setAnim2(''), 300); }
+  // Check burner wallet balance
+  const { data: burnerBalance } = useBalance({
+    address: sessionAddress,
+    query: { refetchInterval: 5000 }
   });
+  const burnerHasGas = burnerBalance && burnerBalance.value > BigInt(500000000000000); // > 0.0005 MON
 
-  const handleEnableOnClick = async () => {
+  // Fund burner using raw window.ethereum — always works, no wagmi needed
+  const fundBurner = async () => {
     try {
-      setSetupStep(1);
-      await fundSession();
-      setSetupStep(2);
-      await authorizeSession();
-      setSetupStep(3);
+      const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+      const amountHex = '0x' + BigInt('10000000000000000').toString(16); // 0.01 MON
+      await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{ from: accounts[0], to: sessionAddress, value: amountHex }],
+      });
     } catch (e) {
-      setSetupStep(0);
-      alert('Setup failed: ' + (e.shortMessage || e.message));
+      alert('Fund failed: ' + (e.message || e));
     }
   };
 
+  useWatchFightMoves(fightId, (log) => {
+    const isP1 = log.player?.toLowerCase() === fightData?.player1?.toLowerCase();
+    const t = Number(log.moveType);
+    if (t === 3) setLastMoveMsg((isP1 ? 'P1' : 'P2') + ' BLOCKS!');
+    else setLastMoveMsg((isP1 ? 'P1' : 'P2') + (log.wasHit ? ' HIT ' + Number(log.damage) + ' dmg!' : ' MISSED!'));
+  });
+
   if (!fightData) return (
-    <div className="min-h-screen bg-black flex items-center justify-center text-purple-500 font-mono animate-pulse text-sm tracking-widest">
+    <div style={{ height: '100vh', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a855f7', fontFamily: 'monospace' }}>
       LOADING ARENA...
     </div>
   );
 
   const f1 = FIGHTERS[fightData.fighter1Id];
   const f2 = FIGHTERS[fightData.fighter2Id];
-  const isP1 = address?.toLowerCase() === fightData.player1?.toLowerCase();
-  const isP2 = address?.toLowerCase() === fightData.player2?.toLowerCase();
-  const isPlayer = isP1 || isP2;
-
-  const rawStatus = Number(fightData.status);
-  const isWaiting = rawStatus === 0;
-  const isFighting = rawStatus === 1;
-  const isResolved = rawStatus === 2;
+  const amIP1 = address?.toLowerCase() === fightData.player1?.toLowerCase();
+  const amIP2 = address?.toLowerCase() === fightData.player2?.toLowerCase();
+  const isPlayer = amIP1 || amIP2;
+  const status = Number(fightData.status);
   const myTurn = fightData.nextTurn?.toLowerCase() === address?.toLowerCase();
-
   const p1hp = Number(fightData.p1HP);
   const p2hp = Number(fightData.p2HP);
   const amIWinner = fightData.winner?.toLowerCase() === address?.toLowerCase();
-
-  const myFighterId = isP1 ? fightData.fighter1Id : fightData.fighter2Id;
+  const myFighterId = amIP1 ? fightData.fighter1Id : fightData.fighter2Id;
   const myStats = STATS[myFighterId];
 
-  const handleMove = async (type) => {
-    try { await playMove(fightId, type); }
-    catch (e) { console.error("Move failed", e.shortMessage || e.message); }
+  const handleMove = async (t) => {
+    try { await playMove(fightId, t); } catch (e) { console.error(e.shortMessage || e.message); }
   };
 
   const handleForfeit = async () => {
     if (!confirm('Forfeit? You lose your stake.')) return;
-    try { await forfeitFight(fightId); }
-    catch (e) { alert('Forfeit failed: ' + (e.shortMessage || e.message)); }
+    try { await forfeitFight(fightId); } catch (e) { alert(e.shortMessage || e.message); }
+  };
+
+  const handleAuthorize = async () => {
+    try {
+      setSetupStep(1);
+      await authorizeSession();
+      setSetupStep(2);
+    } catch (e) {
+      setSetupStep(0);
+      alert('Authorize failed: ' + (e.shortMessage || e.message));
+    }
+  };
+
+  const copyAddress = () => {
+    navigator.clipboard.writeText(sessionAddress);
+    alert('Copied! In MetaMask: Send -> paste address -> type 0.01 -> Send. Then click AUTHORIZE here.');
   };
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden"
-         style={{
-           backgroundImage: 'url(/arena.png)',
-           backgroundSize: 'cover',
-           backgroundPosition: 'center',
-           backgroundColor: '#0a0a0f'
-         }}>
+    <div style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', backgroundImage: 'url(/arena.png)', backgroundSize: 'cover', backgroundPosition: 'center top', backgroundColor: '#0a0a14' }}>
 
-      {/* Dark overlay for readability */}
-      <div className="absolute inset-0 bg-black/50 pointer-events-none" />
-      {flash && <div className="absolute inset-0 bg-white/10 pointer-events-none z-50" />}
-
-      {/* HEADER */}
-      <div className="relative z-40 bg-black/70 backdrop-blur-xl border-b border-white/10 px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <button onClick={onBackToSelect} className="text-[10px] font-bold text-slate-400 hover:text-white px-3 py-1.5 border border-white/10 rounded">
-            ← LOBBY
+      {/* TOPBAR */}
+      <div style={{ flexShrink: 0, background: 'rgba(0,0,0,0.85)', borderBottom: '1px solid rgba(255,255,255,0.08)', padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onBackToSelect} style={{ fontSize: 10, padding: '5px 12px', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>
+            &larr; LOBBY
           </button>
-          {isPlayer && isFighting && (
-            <button onClick={handleForfeit} disabled={isPending}
-              className="text-[10px] font-bold text-red-400 hover:text-red-300 px-3 py-1.5 border border-red-500/20 rounded hover:bg-red-500/10">
-              🏳 FORFEIT
+          {isPlayer && status === 1 && (
+            <button onClick={handleForfeit} disabled={isPending} style={{ fontSize: 10, padding: '5px 12px', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, background: 'transparent', color: '#f87171', cursor: 'pointer' }}>
+              FORFEIT
             </button>
           )}
         </div>
-
-        <div className="text-center">
-          <p className="text-[10px] text-slate-400 font-mono tracking-widest">FIGHT #{fightId.toString()} · STAKE: {formatEther(fightData.stake)} MON</p>
-          <p className={`text-xs font-black italic uppercase ${isFighting ? 'text-green-400' : isWaiting ? 'text-yellow-400 animate-pulse' : 'text-slate-400'}`}>
-            {isWaiting ? '⏳ WAITING FOR OPPONENT' : isFighting ? '⚔️ BATTLE ACTIVE' : '🏆 FIGHT RESOLVED'}
-          </p>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>FIGHT #{String(fightId)} &middot; {formatEther(fightData.stake)} MON stake</div>
+          <div style={{ fontSize: 12, fontWeight: 900, fontStyle: 'italic', color: status === 1 ? '#4ade80' : status === 0 ? '#facc15' : '#94a3b8' }}>
+            {status === 0 ? 'WAITING FOR OPPONENT' : status === 1 ? 'BATTLE ACTIVE' : 'RESOLVED'}
+          </div>
         </div>
-
-        <div className="text-right text-[10px] text-slate-500 font-mono">
-          <p>POOL: {formatEther(fightData.stake * 2n)} MON</p>
+        <div style={{ fontSize: 10, color: '#475569', fontFamily: 'monospace' }}>
+          POOL: {formatEther(fightData.stake * 2n)} MON
         </div>
       </div>
 
-      {/* SESSION BUTTON — below header, not overlapping */}
-      {isPlayer && isFighting && !isSessionReady && (
-        <div className="relative z-40 flex justify-center py-2 bg-black/40">
-          <button onClick={handleEnableOnClick} disabled={setupStep > 0}
-            className="px-5 py-1.5 bg-yellow-500 text-black font-black text-[10px] rounded-lg hover:bg-yellow-400 transition-all disabled:opacity-60">
-            {setupStep === 0 && '⚡ ENABLE ONE-CLICK COMBAT (no more popups)'}
-            {setupStep === 1 && '💰 Sending gas to your browser wallet...'}
-            {setupStep === 2 && '🔑 Authorizing on-chain...'}
-          </button>
-        </div>
-      )}
-      {isPlayer && isFighting && isSessionReady && (
-        <div className="relative z-40 flex justify-center py-1 bg-green-500/10 border-b border-green-500/20">
-          <span className="text-[10px] font-black text-green-400">⚡ ONE-CLICK MODE ACTIVE — No MetaMask popups</span>
+
+      {/* SESSION BAR */}
+      {isPlayer && status === 1 && (
+        <div style={{ flexShrink: 0, background: 'rgba(0,0,0,0.88)', borderBottom: '1px solid rgba(255,255,255,0.08)', padding: '7px 16px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12 }}>
+          {!isSessionReady ? (
+            /* Not authorized yet */
+            <>
+              <span style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace' }}>1:</span>
+              <button onClick={fundBurner} style={{ fontSize: 9, padding: '3px 12px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700 }}>
+                SEND 0.01 MON (opens MetaMask)
+              </button>
+              <span style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace' }}>2:</span>
+              <button onClick={handleAuthorize} disabled={setupStep > 0} style={{ fontSize: 10, padding: '4px 16px', background: '#facc15', color: '#000', fontWeight: 900, border: 'none', borderRadius: 20, cursor: setupStep > 0 ? 'not-allowed' : 'pointer', opacity: setupStep > 0 ? 0.6 : 1 }}>
+                {setupStep === 0 ? 'AUTHORIZE' : 'Confirming in MetaMask...'}
+              </button>
+            </>
+          ) : !burnerHasGas ? (
+            /* Authorized but no gas — need to fund */
+            <>
+              <span style={{ fontSize: 9, color: '#f59e0b', fontFamily: 'monospace', fontWeight: 700 }}>Battle wallet needs gas!</span>
+              <button onClick={fundBurner} style={{ fontSize: 10, padding: '4px 18px', background: '#f59e0b', color: '#000', fontWeight: 900, border: 'none', borderRadius: 20, cursor: 'pointer' }}>
+                SEND 0.01 MON (1 click)
+              </button>
+            </>
+          ) : (
+            /* Fully ready */
+            <span style={{ fontSize: 10, fontWeight: 900, color: '#4ade80', fontFamily: 'monospace' }}>
+              ONE-CLICK ACTIVE &bull; {Number(burnerBalance.formatted).toFixed(4)} MON gas remaining
+            </span>
+          )}
         </div>
       )}
 
       {/* HP BARS */}
-      <div className="relative z-30 flex items-center gap-6 px-8 py-3 bg-black/50 border-b border-white/5">
-        <div className="flex-1">
-          <div className="flex justify-between text-[10px] mb-1">
-            <span className="font-black italic" style={{ color: f1?.color }}>{f1?.name} {fightData.p1Blocking && '🛡'}</span>
-            <span className="text-white font-mono">{p1hp} HP</span>
+      <div style={{ flexShrink: 0, background: 'rgba(0,0,0,0.65)', borderBottom: '1px solid rgba(255,255,255,0.05)', padding: '8px 24px', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
+            <span style={{ fontWeight: 900, fontStyle: 'italic', color: f1 ? f1.color : '#fff' }}>{f1 ? f1.name : ''}  {fightData.p1Blocking ? '[BLOCK]' : ''}</span>
+            <span style={{ color: '#fff', fontFamily: 'monospace' }}>{p1hp} HP</span>
           </div>
-          <div className="h-2.5 bg-black/60 rounded-full overflow-hidden border border-white/10">
-            <div className="h-full rounded-full transition-all duration-500"
-                 style={{ width: `${p1hp}%`, background: p1hp > 50 ? '#22c55e' : p1hp > 25 ? '#eab308' : '#ef4444' }} />
+          <div style={{ height: 8, background: 'rgba(0,0,0,0.5)', borderRadius: 4, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: p1hp + '%', borderRadius: 4, transition: 'width 0.4s', background: p1hp > 50 ? '#22c55e' : p1hp > 25 ? '#eab308' : '#ef4444' }} />
           </div>
         </div>
-        <span className="text-sm font-black text-white/30 italic">VS</span>
-        <div className="flex-1">
-          <div className="flex justify-between text-[10px] mb-1">
-            <span className="text-white font-mono">{isWaiting ? '??' : p2hp} HP</span>
-            <span className="font-black italic" style={{ color: f2?.color }}>{isWaiting ? '???' : f2?.name} {fightData.p2Blocking && '🛡'}</span>
+        <span style={{ fontSize: 12, fontWeight: 900, color: 'rgba(255,255,255,0.15)', fontStyle: 'italic' }}>VS</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
+            <span style={{ color: '#fff', fontFamily: 'monospace' }}>{status === 0 ? '--' : p2hp} HP</span>
+            <span style={{ fontWeight: 900, fontStyle: 'italic', color: f2 ? f2.color : '#fff' }}>{fightData.p2Blocking ? '[BLOCK]  ' : ''}{status === 0 ? '???' : (f2 ? f2.name : '')}</span>
           </div>
-          <div className="h-2.5 bg-black/60 rounded-full overflow-hidden border border-white/10">
-            <div className="h-full rounded-full transition-all duration-500 ml-auto"
-                 style={{ width: `${isWaiting ? 0 : p2hp}%`, background: p2hp > 50 ? '#22c55e' : p2hp > 25 ? '#eab308' : '#ef4444' }} />
+          <div style={{ height: 8, background: 'rgba(0,0,0,0.5)', borderRadius: 4, overflow: 'hidden', display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ height: '100%', width: (status === 0 ? 0 : p2hp) + '%', borderRadius: 4, transition: 'width 0.4s', background: p2hp > 50 ? '#22c55e' : p2hp > 25 ? '#eab308' : '#ef4444' }} />
           </div>
         </div>
       </div>
 
-      {/* STAGE — fighters + combat UI */}
-      <div className="relative z-20 flex-1 flex items-center justify-between px-12">
+      {/* STAGE */}
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 48px', minHeight: 0 }}>
 
         {/* P1 */}
-        <div className={`flex flex-col items-center transition-all duration-200 ${anim1}`}>
-          <div className={`w-44 h-44 rounded-full overflow-hidden border-4 transition-all
-                          ${isFighting && myTurn && isP1 ? 'ring-4 ring-purple-500 border-purple-500 scale-105' : 'border-white/20'}`}>
-            <img src={`/fighters/f${fightData.fighter1Id}.png`} alt={f1?.name} className="w-full h-full object-cover" />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 140, height: 140, borderRadius: '50%', overflow: 'hidden', border: '4px solid ' + (status === 1 && myTurn && amIP1 ? '#a855f7' : 'rgba(255,255,255,0.2)'), boxShadow: status === 1 && myTurn && amIP1 ? '0 0 24px rgba(168,85,247,0.7)' : 'none', transition: 'all 0.2s' }}>
+            <img src={'/fighters/f' + fightData.fighter1Id + '.png'} alt={f1 ? f1.name : ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
-          <p className="mt-2 text-[9px] text-slate-400 font-mono">{fightData.player1?.slice(0,6)}...{fightData.player1?.slice(-4)}</p>
+          <span style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace' }}>{fightData.player1 ? fightData.player1.slice(0,6) + '...' + fightData.player1.slice(-4) : ''}</span>
         </div>
 
         {/* CENTER */}
-        <div className="flex-1 max-w-xs mx-6">
-          {isFighting && isPlayer && (
-            <div className="bg-black/85 backdrop-blur-xl rounded-2xl border border-white/10 p-4 shadow-2xl">
-              <p className={`text-[9px] font-black tracking-widest mb-3 text-center ${myTurn ? 'text-green-400 animate-pulse' : 'text-slate-600'}`}>
-                {myTurn ? '⚡ YOUR TURN' : "⏳ OPPONENT'S TURN"}
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', marginLeft: 20, marginRight: 20 }}>
+
+          {status === 1 && isPlayer && (
+            <div style={{ width: '100%', maxWidth: 260, background: 'rgba(0,0,0,0.88)', borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', padding: 16, boxShadow: '0 8px 40px rgba(0,0,0,0.6)' }}>
+              <p style={{ fontSize: 9, fontWeight: 900, letterSpacing: 2, marginBottom: 12, textAlign: 'center', color: myTurn ? '#4ade80' : '#334155', margin: '0 0 12px' }}>
+                {myTurn ? 'YOUR TURN - PICK A MOVE' : "OPPONENT'S TURN..."}
               </p>
-              <div className="grid grid-cols-3 gap-2">
-                <button onClick={() => handleMove(1)} disabled={!myTurn || isPending}
-                  className="flex flex-col items-center p-2.5 bg-blue-600/10 border border-blue-500/20 rounded-xl hover:bg-blue-600/30 transition-all disabled:opacity-20">
-                  <span className="text-lg">🗡️</span>
-                  <span className="text-[9px] font-black text-blue-400 mt-0.5">LIGHT</span>
-                  <span className="text-[8px] text-slate-500">{myStats?.light}</span>
-                  <span className="text-[7px] text-slate-600">{myStats?.lightAcc} hit</span>
-                </button>
-                <button onClick={() => handleMove(2)} disabled={!myTurn || isPending}
-                  className="flex flex-col items-center p-2.5 bg-red-600/10 border border-red-500/20 rounded-xl hover:bg-red-600/30 transition-all disabled:opacity-20">
-                  <span className="text-lg">🪓</span>
-                  <span className="text-[9px] font-black text-red-400 mt-0.5">HEAVY</span>
-                  <span className="text-[8px] text-slate-500">{myStats?.heavy}</span>
-                  <span className="text-[7px] text-slate-600">{myStats?.heavyAcc} hit</span>
-                </button>
-                <button onClick={() => handleMove(3)} disabled={!myTurn || isPending}
-                  className="flex flex-col items-center p-2.5 bg-yellow-600/10 border border-yellow-500/20 rounded-xl hover:bg-yellow-600/30 transition-all disabled:opacity-20">
-                  <span className="text-lg">🛡️</span>
-                  <span className="text-[9px] font-black text-yellow-400 mt-0.5">BLOCK</span>
-                  <span className="text-[8px] text-slate-500">{myStats?.block}</span>
-                  <span className="text-[7px] text-slate-600">reduce</span>
-                </button>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                {[
+                  { t: 1, icon: 'LIGHT', emoji: 'S', col: '#3b82f6', stat: myStats ? myStats.light : '', acc: myStats ? myStats.lightAcc : '' },
+                  { t: 2, icon: 'HEAVY', emoji: 'H', col: '#ef4444', stat: myStats ? myStats.heavy : '', acc: myStats ? myStats.heavyAcc : '' },
+                  { t: 3, icon: 'BLOCK', emoji: 'B', col: '#eab308', stat: myStats ? myStats.block : '', acc: 'reduce' },
+                ].map(function(m) { return (
+                  <button
+                    key={m.t}
+                    onClick={() => handleMove(m.t)}
+                    disabled={!myTurn || isPending}
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 4px', borderRadius: 12, border: '1px solid ' + m.col + '44', background: m.col + '18', color: m.col, cursor: (myTurn && !isPending) ? 'pointer' : 'not-allowed', opacity: (myTurn && !isPending) ? 1 : 0.2, transition: 'all 0.15s', fontSize: 9, fontWeight: 900 }}
+                  >
+                    <span style={{ fontSize: 20, marginBottom: 4 }}>
+                      {m.t === 1 ? '\u2694\uFE0F' : m.t === 2 ? '\u{1FA93}' : '\u{1F6E1}\uFE0F'}
+                    </span>
+                    {m.icon}
+                    <span style={{ fontSize: 8, color: '#64748b', marginTop: 2 }}>{m.stat}</span>
+                    <span style={{ fontSize: 7, color: '#374151' }}>{m.acc}</span>
+                  </button>
+                ); })}
               </div>
-              {lastMoveMsg && <p className="mt-3 text-[9px] text-center font-mono text-purple-300">{lastMoveMsg}</p>}
+              {lastMoveMsg && <p style={{ marginTop: 10, fontSize: 9, textAlign: 'center', color: '#c084fc', fontFamily: 'monospace' }}>{lastMoveMsg}</p>}
             </div>
           )}
 
-          {isFighting && !isPlayer && (
-            <div className="bg-black/70 rounded-2xl border border-white/10 p-4 text-center">
-              <p className="text-[10px] text-slate-500 font-mono">SPECTATING</p>
-              {lastMoveMsg && <p className="mt-2 text-[9px] text-purple-300 font-mono">{lastMoveMsg}</p>}
+          {status === 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 32, height: 32, border: '2px solid #a855f7', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+              <p style={{ fontSize: 9, color: '#475569', fontFamily: 'monospace', textAlign: 'center' }}>
+                Waiting for opponent...<br />
+                <span style={{ color: '#a855f7', fontWeight: 900 }}>Fight ID: #{String(fightId)}</span>
+              </p>
             </div>
           )}
 
-          {isWaiting && (
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-8 h-8 border-t-2 border-purple-500 rounded-full animate-spin" />
-              <p className="text-[9px] text-slate-500 font-mono uppercase">Waiting... share Fight ID: <span className="text-purple-400 font-black">#{fightId.toString()}</span></p>
+          {status === 1 && !isPlayer && (
+            <div style={{ background: 'rgba(0,0,0,0.7)', borderRadius: 12, padding: 16, textAlign: 'center' }}>
+              <p style={{ fontSize: 10, color: '#475569', fontFamily: 'monospace' }}>SPECTATING</p>
+              {lastMoveMsg && <p style={{ marginTop: 6, fontSize: 9, color: '#c084fc', fontFamily: 'monospace' }}>{lastMoveMsg}</p>}
             </div>
           )}
 
-          {isResolved && (
-            <div className="bg-black/90 rounded-2xl border border-white/10 p-6 text-center">
-              <h3 className={`text-4xl font-black italic mb-2 ${amIWinner ? 'text-yellow-400' : 'text-red-500'}`}>
+          {status === 2 && (
+            <div style={{ width: '100%', maxWidth: 260, background: 'rgba(0,0,0,0.92)', borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', padding: 28, textAlign: 'center' }}>
+              <h3 style={{ fontSize: 36, fontWeight: 900, fontStyle: 'italic', color: amIWinner ? '#facc15' : '#ef4444', margin: '0 0 6px' }}>
                 {amIWinner ? 'VICTORY!' : 'DEFEAT'}
               </h3>
-              <p className="text-[10px] text-slate-400 mb-4">
-                {amIWinner ? `+${formatEther(fightData.stake * 2n)} MON earned` : 'Better luck next round'}
+              <p style={{ fontSize: 10, color: '#64748b', marginBottom: 16 }}>
+                {amIWinner ? '+' + formatEther(fightData.stake * 2n) + ' MON earned' : 'Better luck next round'}
               </p>
-              <button onClick={onBackToSelect} className="w-full py-3 bg-purple-600 text-white font-black text-sm rounded-xl hover:bg-purple-500">
+              <button onClick={onBackToSelect} style={{ width: '100%', padding: 12, background: '#7c3aed', color: '#fff', fontWeight: 900, fontSize: 13, borderRadius: 10, border: 'none', cursor: 'pointer' }}>
                 BACK TO LOBBY
               </button>
             </div>
@@ -256,17 +261,18 @@ export default function Arena({ fightId, onBackToSelect }) {
         </div>
 
         {/* P2 */}
-        <div className={`flex flex-col items-center transition-all duration-200 ${anim2}`}>
-          <div className={`w-44 h-44 rounded-full overflow-hidden border-4 transition-all
-                          ${isFighting && myTurn && isP2 ? 'ring-4 ring-purple-500 border-purple-500 scale-105' : 'border-white/20'}`}>
-            {!isWaiting
-              ? <img src={`/fighters/f${fightData.fighter2Id}.png`} alt={f2?.name} className="w-full h-full object-cover" />
-              : <div className="w-full h-full flex items-center justify-center text-4xl text-slate-700">?</div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 140, height: 140, borderRadius: '50%', overflow: 'hidden', border: '4px solid ' + (status === 1 && myTurn && amIP2 ? '#a855f7' : 'rgba(255,255,255,0.2)'), boxShadow: status === 1 && myTurn && amIP2 ? '0 0 24px rgba(168,85,247,0.7)' : 'none', transition: 'all 0.2s' }}>
+            {status > 0
+              ? <img src={'/fighters/f' + fightData.fighter2Id + '.png'} alt={f2 ? f2.name : ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, color: '#1e293b' }}>?</div>
             }
           </div>
-          {!isWaiting && <p className="mt-2 text-[9px] text-slate-400 font-mono">{fightData.player2?.slice(0,6)}...{fightData.player2?.slice(-4)}</p>}
+          {status > 0 && <span style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace' }}>{fightData.player2 ? fightData.player2.slice(0,6) + '...' + fightData.player2.slice(-4) : ''}</span>}
         </div>
       </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

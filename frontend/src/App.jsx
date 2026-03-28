@@ -33,7 +33,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-purple-500/30">
       
-      <nav className="fixed top-8 right-8 z-[300] flex items-center gap-4 bg-black/80 backdrop-blur-3xl p-3 rounded-2xl border border-white/10 shadow-2xl">
+      <nav className={`fixed top-8 right-8 z-[300] flex items-center gap-4 bg-black/80 backdrop-blur-3xl p-3 rounded-2xl border border-white/10 shadow-2xl ${screen === 'arena' ? 'hidden' : ''}`}>
         <div className="flex items-center gap-2 pr-3 border-r border-white/10 mr-1">
             <button 
               onClick={() => setScreen('select')}
