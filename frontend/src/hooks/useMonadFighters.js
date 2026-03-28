@@ -1,10 +1,10 @@
-import { useWriteContract, useReadContract, useWatchContractEvent } from 'wagmi';
+import { useWriteContract, useReadContract, useWatchContractEvent, useSendTransaction } from 'wagmi';
 import { parseEther, createWalletClient, http, publicActions } from 'viem';
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import { CONTRACT_ADDRESS, ABI } from '../constants';
 import { monadTestnet } from '../wagmi.config';
 
-// Simple Session Key management locally
+// Manage a persistent burner wallet in localStorage
 const getSessionAccount = () => {
   let key = localStorage.getItem('monad_brawler_session');
   if (!key) {
@@ -16,15 +16,23 @@ const getSessionAccount = () => {
 
 export function useMonadFighters() {
   const { writeContractAsync, isPending } = useWriteContract();
+  const { sendTransactionAsync } = useSendTransaction();
   const sessionAccount = getSessionAccount();
 
-  const authorizeSession = () => 
+  // Step 1: Fund the burner wallet directly (simple ETH transfer, no contract)
+  const fundSession = () =>
+    sendTransactionAsync({
+      to: sessionAccount.address,
+      value: parseEther('0.005'), // 0.005 MON for gas - lasts many fights
+    });
+
+  // Step 2: Authorize the burner in the contract (separate call)
+  const authorizeSession = () =>
     writeContractAsync({
       address: CONTRACT_ADDRESS,
       abi: ABI,
       functionName: 'authorizeSession',
       args: [sessionAccount.address],
-      value: parseEther('0.01'), // Send gas money to the burner!
     });
 
   const enterArena = (fighterId, stakeEth) =>
@@ -54,9 +62,8 @@ export function useMonadFighters() {
       value: parseEther(stakeEth),
     });
 
-  // THE MAGIC: Play move using the session wallet (no popup)
+  // THE MAGIC: burner wallet signs moves — zero MetaMask popup
   const playMove = async (fightId, moveType) => {
-    // We use a separate local wallet client for the burner to avoid triggering the connected wallet (MetaMask)
     const client = createWalletClient({
       account: sessionAccount,
       chain: monadTestnet,
@@ -64,25 +71,32 @@ export function useMonadFighters() {
     }).extend(publicActions);
 
     try {
-        const { request } = await client.simulateContract({
-            address: CONTRACT_ADDRESS,
-            abi: ABI,
-            functionName: 'playMove',
-            args: [BigInt(fightId), moveType],
-            account: sessionAccount,
-        });
-        return await client.writeContract(request);
+      const { request } = await client.simulateContract({
+        address: CONTRACT_ADDRESS,
+        abi: ABI,
+        functionName: 'playMove',
+        args: [BigInt(fightId), moveType],
+        account: sessionAccount,
+      });
+      return await client.writeContract(request);
     } catch (e) {
-        console.warn("Session move failed, falling back to main wallet:", e);
-        // Fallback to main wallet if session is not funded or authorized
-        return writeContractAsync({
-            address: CONTRACT_ADDRESS,
-            abi: ABI,
-            functionName: 'playMove',
-            args: [BigInt(fightId), moveType],
-        });
+      console.warn("Session move failed, falling back to MetaMask:", e.shortMessage || e.message);
+      return writeContractAsync({
+        address: CONTRACT_ADDRESS,
+        abi: ABI,
+        functionName: 'playMove',
+        args: [BigInt(fightId), moveType],
+      });
     }
   };
+
+  const forfeitFight = (fightId) =>
+    writeContractAsync({
+      address: CONTRACT_ADDRESS,
+      abi: ABI,
+      functionName: 'forfeitFight',
+      args: [BigInt(fightId)],
+    });
 
   const betOnFighter = (fightId, side, betEth) =>
     writeContractAsync({
@@ -93,7 +107,18 @@ export function useMonadFighters() {
       value: parseEther(betEth),
     });
 
-  return { enterArena, startTraining, joinFight, playMove, betOnFighter, authorizeSession, sessionAddress: sessionAccount.address, isPending };
+  return {
+    enterArena,
+    startTraining,
+    joinFight,
+    playMove,
+    forfeitFight,
+    betOnFighter,
+    fundSession,
+    authorizeSession,
+    sessionAddress: sessionAccount.address,
+    isPending,
+  };
 }
 
 export function useFight(fightId) {
@@ -118,16 +143,6 @@ export function useWatchFightMoves(fightId, onMove) {
         }
       });
     },
-  });
-}
-
-export function useFighter(id) {
-  return useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: ABI,
-    functionName: 'getFighter',
-    args: [id],
-    query: { refetchInterval: 5000 }
   });
 }
 
