@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --final-hp: 100%;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #0a0a0f;
+  color: white;
+  font-family: 'Courier New', Courier, monospace;
+  overflow-x: hidden;
+}
+
+/* --- UI COMPONENTS --- */
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* --- ANIMATIONS --- */
+
+@keyframes attack-right {
+  0%   { transform: translateX(0); }
+  30%  { transform: translateX(60px) scale(1.1); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes attack-left {
+  0%   { transform: scaleX(-1) translateX(0); }
+  30%  { transform: scaleX(-1) translateX(60px) scale(1.1); }
+  100% { transform: scaleX(-1) translateX(0); }
+}
+
+@keyframes take-hit {
+  0%   { transform: translateX(0); filter: brightness(1); }
+  20%  { transform: translateX(-20px); filter: brightness(3) saturate(0); }
+  50%  { transform: translateX(10px); filter: brightness(1); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes knockout {
+  0%   { transform: rotate(0deg); opacity: 1; }
+  60%  { transform: rotate(-45deg) translateY(20px); opacity: 0.6; }
+  100% { transform: rotate(-90deg) translateY(50px); opacity: 0.2; }
+}
+
+@keyframes victory {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%       { transform: translateY(-20px) scale(1.05); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { text-shadow: 0 0 20px rgba(168, 85, 247, 0.4); }
+  50%      { text-shadow: 0 0 40px rgba(168, 85, 247, 0.8); }
+}
+
+.animate-attack-right { animation: attack-right 0.6s ease-in-out; }
+.animate-attack-left  { animation: attack-left  0.6s ease-in-out; }
+.animate-take-hit     { animation: take-hit     0.5s ease-in-out; }
+.animate-knockout     { animation: knockout     1s ease-in forwards; }
+.animate-victory      { animation: victory      0.8s ease-in-out infinite; }
+.animate-glow         { animation: glow-pulse   2s ease-in-out infinite; }
+
+/* Image sharpening for pixel art */
+img {
+  image-rendering: pixelated;
+}
