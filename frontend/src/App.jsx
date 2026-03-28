@@ -101,7 +101,7 @@ export default function App() {
       </main>
 
       <div className="fixed bottom-6 right-8 text-[10px] font-mono text-slate-700 tracking-[0.3em] uppercase pointer-events-none z-50">
-        Monad_Fighters // Speed Combat Protocol
+        Fight_Club // Speed Combat Protocol
       </div>
 
     </div>

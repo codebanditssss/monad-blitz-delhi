@@ -59,7 +59,7 @@ export default function CharacterSelect({ onEnterArena, onJoinFight }) {
          style={{ background: 'radial-gradient(ellipse at center, #1a0a2e 0%, #050508 70%)' }}>
       
       <div className="text-center mb-12">
-        <h1 className="text-6xl font-black tracking-tighter mb-2 animate-glow italic text-purple-500">MONAD FIGHTERS</h1>
+        <h1 className="text-6xl font-black tracking-tighter mb-2 animate-glow italic text-purple-500">FIGHT CLUB</h1>
         <p className="text-purple-400 font-mono tracking-widest text-sm uppercase">On-chain PvP Arena // High Speed Battle</p>
       </div>
 

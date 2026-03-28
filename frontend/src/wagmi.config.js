@@ -14,7 +14,7 @@ export const monadTestnet = defineChain({
 });
 
 export const wagmiConfig = getDefaultConfig({
-  appName: 'Monad Fighters',
+  appName: 'Fight Club',
   projectId: 'd272d2819ad2a37bdf0eef4ff8cd4722',
   chains: [monadTestnet],
 });
