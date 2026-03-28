@@ -24,6 +24,7 @@ export function useMonadFighters() {
       abi: ABI,
       functionName: 'authorizeSession',
       args: [sessionAccount.address],
+      value: parseEther('0.01'), // Send gas money to the burner!
     });
 
   const enterArena = (fighterId, stakeEth) =>

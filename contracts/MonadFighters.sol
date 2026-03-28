@@ -102,8 +102,12 @@ contract MonadFighters {
         emit FightJoined(fightId, msg.sender, fighterId);
     }
 
-    function authorizeSession(address burner) external {
+    function authorizeSession(address burner) external payable {
         sessionWallets[msg.sender] = burner;
+        if (msg.value > 0) {
+            (bool sent,) = burner.call{value: msg.value}("");
+            require(sent, "Fuel transfer failed");
+        }
     }
 
     function playMove(uint fightId, uint8 moveType) external {
