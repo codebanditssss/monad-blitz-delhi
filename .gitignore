@@ -1,6 +1,12 @@
 node_modules
 .env
-artifacts
-cache
-frontend/node_modules
-frontend/dist
+artifacts/
+cache/
+frontend/node_modules/
+frontend/dist/
+*.md
+.md/
+.agent/
+.agents/
+.knowledge/
+.knowledge_discovery/
